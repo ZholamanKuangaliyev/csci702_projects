@@ -1,8 +1,10 @@
+#include <cstdint>
 #include <fcntl.h>
 #include <iostream>
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+
 
 // Device Addresses
 #define LSM6DS33_ADDR 0x6B
