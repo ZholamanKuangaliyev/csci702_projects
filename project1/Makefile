@@ -1,28 +1,28 @@
-# Makefile for Raspberry Pi 3 Model B
-
-# Compiler
+# Combined Makefile for Project 1
 CXX = g++
-
-# Compiler flags
-# -Wall: Enable all warnings
-# -std=c++11: Ensure C++11 support
 CXXFLAGS = -Wall -std=c++11
 
-# Target executable name
-TARGET = main
+# Executable names
+TARGET_MAIN = main
+TARGET_TASK7 = task7
 
 # Source files
-SRCS = main.cpp
+SRCS_MAIN = main.cpp
+SRCS_TASK7 = task7.cpp
 
-# Default target
-all: $(TARGET)
+# Default target: builds both programs
+all: $(TARGET_MAIN) $(TARGET_TASK7)
 
-# Rule to build the executable
-$(TARGET): $(SRCS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRCS)
+# Rule for the original main project
+$(TARGET_MAIN): $(SRCS_MAIN)
+	$(CXX) $(CXXFLAGS) -o $(TARGET_MAIN) $(SRCS_MAIN)
 
-# Clean up build files
+# Rule for Task 7
+$(TARGET_TASK7): $(SRCS_TASK7)
+	$(CXX) $(CXXFLAGS) -o $(TARGET_TASK7) $(SRCS_TASK7)
+
+# Clean up all executables
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET_MAIN) $(TARGET_TASK7)
 
 .PHONY: all clean
