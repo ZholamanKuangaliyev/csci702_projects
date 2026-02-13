@@ -1,4 +1,4 @@
-#include <cstdint> // Add this line to fix the uint8_t errors
+#include <cstdint>
 #include <fcntl.h>
 #include <iomanip>
 #include <iostream>
@@ -6,12 +6,9 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-
-// Device Addresses
 #define LSM6_ADDR 0x6B
 #define LIS3_ADDR 0x1E
 
-// Registers
 #define CTRL1_XL 0x10
 #define CTRL_REG1_M 0x20
 #define CTRL_REG3_M 0x22
@@ -40,14 +37,12 @@ int16_t read_sensor_axis(int file, uint8_t addr, uint8_t reg_low) {
   if (read(file, data, 2) != 2)
     return 0;
 
-  // Combine High and Low bytes into 16-bit signed integer
   return (int16_t)(data[0] | (data[1] << 8));
 }
 
 int main() {
   int file = open_i2c();
 
-  // Initialize sensors
   write_reg(file, LSM6_ADDR, CTRL1_XL, 0x40);
   write_reg(file, LIS3_ADDR, CTRL_REG1_M, 0x70);
   write_reg(file, LIS3_ADDR, CTRL_REG3_M, 0x00);
