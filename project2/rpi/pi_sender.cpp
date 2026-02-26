@@ -135,6 +135,13 @@ public:
         data[0] = readRegister16(0x3B) * accelScale; data[1] = readRegister16(0x3D) * accelScale;
         data[2] = readRegister16(0x3F) * accelScale; data[3] = readRegister16(0x43) * gyroScale;
         data[4] = readRegister16(0x45) * gyroScale;  data[5] = readRegister16(0x47) * gyroScale;
+
+        static int debug_count = 0;
+        if (debug_count++ % 100 == 0) {
+            std::cout << "Sensor: ax=" << data[0] << " ay=" << data[1] << " az=" << data[2]
+                      << " gx=" << data[3] << " gy=" << data[4] << " gz=" << data[5] << "\n";
+        }
+
         return data;
     }
 
@@ -164,8 +171,14 @@ int main() {
     std::cout << "Streaming IMU data to " << PC_IP << ":" << PORT << "...\n";
 
     const float dt = 0.01f; // 10ms = 100Hz
+    int frame = 0;
     while (true) {
         Quat q = myIMU.updateAndGetOrientation(dt);
+
+        // Debug: print quaternion every 100 frames (~1 second)
+        if (frame++ % 100 == 0) {
+            std::cout << "q: [" << q.w << ", " << q.x << ", " << q.y << ", " << q.z << "]\n";
+        }
 
         double packet[4] = {q.w, q.x, q.y, q.z};
         sendto(sockfd, (const char *)packet, sizeof(packet), MSG_CONFIRM, (const struct sockaddr *)&servaddr, sizeof(servaddr));
