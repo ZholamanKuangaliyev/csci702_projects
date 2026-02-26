@@ -28,17 +28,25 @@ public:
         file = open(filename, O_RDWR);
         if (file < 0 || ioctl(file, I2C_SLAVE, deviceAddress) < 0) {
             std::cerr << "Warning: Failed to initialize I2C bus or device.\n";
-            file = -1; 
+            file = -1;
         }
     }
     virtual ~I2CDevice() { if (file >= 0) close(file); }
 
+    void writeRegister(uint8_t reg, uint8_t value) {
+        if (file < 0) return;
+        uint8_t buffer[2] = {reg, value};
+        write(file, buffer, 2);
+    }
+
     int16_t readRegister16(uint8_t reg) {
-        if (file < 0) return 0; 
-        uint8_t buffer[2];
+        if (file < 0) return 0;
+        // Write register address
         if (write(file, &reg, 1) != 1) return 0;
+        // Read 2 bytes (LSM6DS33 is little-endian: low byte first)
+        uint8_t buffer[2];
         if (read(file, buffer, 2) != 2) return 0;
-        return (int16_t)((buffer[0] << 8) | buffer[1]); 
+        return (int16_t)(buffer[0] | (buffer[1] << 8));
     }
 };
 
@@ -125,16 +133,32 @@ private:
     float accelScale, gyroScale;
     MadgwickFilter filter;
 public:
+    // LSM6DS33 sensor address: 0x6B
     IMUSensor(int bus, int address) : I2CDevice(bus, address) {
-        accelScale = 2.0f / 32768.0f; gyroScale = 250.0f / 32768.0f;
+        // LSM6DS33 scales: ±2g for accel, ±245 dps for gyro
+        accelScale = 0.061f / 1000.0f; // mg to g
+        gyroScale = 8.75f / 1000.0f;    // mdps to dps
     }
-    void configureIMU() { /* Write wake-up registers */ }
-    
+
+    void configureIMU() {
+        // CTRL1_XL (0x10): 0x40 = 104 Hz, ±2g
+        writeRegister(0x10, 0x40);
+        // CTRL2_G (0x11): 0x40 = 104 Hz, ±245 dps
+        writeRegister(0x11, 0x40);
+        std::cout << "LSM6DS33 configured\n";
+    }
+
     std::vector<float> readPhysicalValues() {
         std::vector<float> data(6, 0.0f);
-        data[0] = readRegister16(0x3B) * accelScale; data[1] = readRegister16(0x3D) * accelScale;
-        data[2] = readRegister16(0x3F) * accelScale; data[3] = readRegister16(0x43) * gyroScale;
-        data[4] = readRegister16(0x45) * gyroScale;  data[5] = readRegister16(0x47) * gyroScale;
+        // LSM6DS33 register addresses
+        // Accel: OUTX_L_XL=0x28, OUTY_L_XL=0x2A, OUTZ_L_XL=0x2C
+        // Gyro:  OUTX_L_G=0x22,  OUTY_L_G=0x24,  OUTZ_L_G=0x26
+        data[0] = readRegister16(0x28) * accelScale; // ax
+        data[1] = readRegister16(0x2A) * accelScale; // ay
+        data[2] = readRegister16(0x2C) * accelScale; // az
+        data[3] = readRegister16(0x22) * gyroScale;  // gx
+        data[4] = readRegister16(0x24) * gyroScale;  // gy
+        data[5] = readRegister16(0x26) * gyroScale;  // gz
 
         static int debug_count = 0;
         if (debug_count++ % 100 == 0) {
@@ -153,7 +177,8 @@ public:
 };
 
 int main() {
-    IMUSensor myIMU(1, 0x68);
+    // LSM6DS33 address is 0x6B
+    IMUSensor myIMU(1, 0x6B);
     myIMU.configureIMU();
 
     int sockfd;
