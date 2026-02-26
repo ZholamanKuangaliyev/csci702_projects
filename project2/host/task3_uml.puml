@@ -1,0 +1,144 @@
+@startuml IMU_System_Class_Diagram
+
+title IMU Data Processing & Visualization System\nUML Class Diagram — CSCI 702 Project 2
+
+skinparam classAttributeIconSize 0
+skinparam class {
+    BackgroundColor White
+    BorderColor Black
+    ArrowColor Black
+    FontName Arial
+}
+skinparam package {
+    BackgroundColor #F0F8FF
+    BorderColor #336699
+}
+
+' =============================================
+' SHARED DATA STRUCTURE
+' =============================================
+
+package "Shared Data" #FFFACD {
+    class Quat <<struct>> {
+        +w : double
+        +x : double
+        +y : double
+        +z : double
+    }
+}
+
+' =============================================
+' RASPBERRY PI SIDE
+' =============================================
+
+package "Raspberry Pi — Sender (pi_sender.cpp)" #E8F5E9 {
+
+    class I2CDevice {
+        #file          : int
+        #bus           : int
+        #deviceAddress : int
+        --
+        +I2CDevice(bus : int, address : int)
+        +~I2CDevice()
+        +writeRegister8(reg : uint8_t, value : uint8_t) : void
+        +readRegister16(reg : uint8_t) : int16_t
+    }
+
+    class MadgwickFilter {
+        -beta : float
+        -q0   : float
+        -q1   : float
+        -q2   : float
+        -q3   : float
+        --
+        +MadgwickFilter()
+        +update(gx : float, gy : float, gz : float,\n  ax : float, ay : float, az : float,\n  dt : float) : void
+        +getQuaternion() : Quat
+    }
+
+    class IMUSensor {
+        -accelScale : float
+        -gyroScale  : float
+        -filter     : MadgwickFilter
+        --
+        +IMUSensor(bus : int, address : int)
+        +configureIMU() : void
+        +readPhysicalValues() : vector<float>
+        +updateAndGetOrientation(dt : float) : Quat
+    }
+
+    class UDPSender <<service>> {
+        -sockfd   : int
+        -servaddr : sockaddr_in
+        --
+        +UDPSender(ip : string, port : int)
+        +sendQuaternion(q : Quat) : void
+        +close() : void
+    }
+
+}
+
+' =============================================
+' HOST PC SIDE
+' =============================================
+
+package "Host PC — Receiver (pc_receiver.cpp)" #E8EAF6 {
+
+    class QuaternionUtils <<utility>> {
+        +{static} normalize(q : Quat) : Quat
+        +{static} quatToMat4(q : Quat) : array<float,16>
+        +{static} mul(a : Quat, b : Quat) : Quat
+        +{static} fromAxisAngle(ax : double, ay : double,\n  az : double, angle : double) : Quat
+    }
+
+    class UDPReceiver <<service>> {
+        -sockfd : int
+        --
+        +UDPReceiver(port : int)
+        +initUDP() : void
+        +receiveQuaternion() : Quat
+    }
+
+    class OpenGLRenderer {
+        -g_q       : Quat
+        -g_width   : int
+        -g_height  : int
+        -g_rot_step : float
+        --
+        +display() : void
+        +reshape(w : int, h : int) : void
+        +idle() : void
+        +keyboard(key : char, x : int, y : int) : void
+        -drawAxes(len : float) : void
+        -drawCubeSolid(s : float) : void
+        -drawCubeWire(s : float) : void
+    }
+
+}
+
+' =============================================
+' RELATIONSHIPS
+' =============================================
+
+' Inheritance (is-a)
+IMUSensor --|> I2CDevice : extends
+
+' Composition (has-a, lifetime dependency)
+IMUSensor *-- MadgwickFilter : has-a\n(filter)
+
+' Dependencies / usage (uses / returns)
+IMUSensor       ..>  Quat           : returns
+MadgwickFilter  ..>  Quat           : returns
+UDPSender       ..>  Quat           : serializes & sends
+UDPReceiver     ..>  Quat           : deserializes & returns
+QuaternionUtils ..>  Quat           : operates on
+
+' Aggregation (uses but does not own lifetime)
+OpenGLRenderer  o--  Quat           : holds current\norientation (g_q)
+OpenGLRenderer  ..>  QuaternionUtils : uses
+OpenGLRenderer  ..>  UDPReceiver    : polls for data\nin idle()
+
+' Network link
+UDPSender ..[#CC0000]..> UDPReceiver : <<UDP/IP>>\nport 8080\nQuaternion\n[w, x, y, z]
+
+@enduml
