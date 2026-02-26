@@ -6,18 +6,16 @@
 #include <vector>
 #include <cmath>
 #include <iomanip>
-#include <cstdint> // Added this line to fix the uint8_t and int16_t errors
+#include <cstdint>
 
 // ---------- 1. DATA STRUCTURE ----------
 
-// Structure to hold our quaternion orientation [cite: 38]
 struct Quat {
     double w{1.0}, x{0.0}, y{0.0}, z{0.0};
 };
 
 // ---------- 2. HARDWARE ABSTRACTION LAYER (HAL) ----------
 
-// Base class encapsulating low-level I2C communication [cite: 20, 21]
 class I2CDevice {
 protected:
     int file;
@@ -30,7 +28,8 @@ public:
         snprintf(filename, 19, "/dev/i2c-%d", bus);
         file = open(filename, O_RDWR);
         if (file < 0 || ioctl(file, I2C_SLAVE, deviceAddress) < 0) {
-            std::cerr << "Warning: Failed to initialize I2C bus. Running in simulation mode." << std::endl;
+            std::cerr << "Hardware Error: Failed to initialize I2C bus or find device at address 0x" 
+                      << std::hex << address << std::endl;
             file = -1; 
         }
     }
@@ -45,50 +44,77 @@ public:
         write(file, buffer, 2);
     }
 
-    // Read a 16-bit data word by combining readings from two 8-bit data registers (high and low) [cite: 35]
     int16_t readRegister16(uint8_t reg) {
         if (file < 0) return 0; 
-        
         uint8_t buffer[2];
-        // Point to the register
         if (write(file, &reg, 1) != 1) return 0;
-        // Read 2 consecutive bytes
         if (read(file, buffer, 2) != 2) return 0;
-        
-        // Combine bytes (Assuming MSB first)
         return (int16_t)((buffer[0] << 8) | buffer[1]); 
     }
 };
 
-// ---------- 3. MADGWICK FILTER WRAPPER ----------
+// ---------- 3. REAL MADGWICK FILTER ----------
 
-// OOP Wrapper for the downloaded Madgwick open-source C algorithm [cite: 37]
 class MadgwickFilter {
 private:
+    float beta{0.1f}; // 2 * proportional gain
     float q0{1.0f}, q1{0.0f}, q2{0.0f}, q3{0.0f};
 
 public:
+    // Implementation of Sebastian Madgwick's 6DOF AHRS algorithm
     void update(float gx, float gy, float gz, float ax, float ay, float az, float dt) {
-        // IMPORTANT: 
-        // This is where you call the actual MadgwickAHRSupdateIMU() function 
-        // from the C code you downloaded from http://www.x-io.co.uk/[cite: 37].
-        // 
-        // Example integration:
-        // MadgwickAHRSupdateIMU(gx, gy, gz, ax, ay, az);
-        // q0 = q0_madgwick; q1 = q1_madgwick; ...
-        
-        // Placeholder simulation for demonstration:
-        q0 = std::cos(dt); q1 = std::sin(dt); q2 = 0.0f; q3 = 0.0f;
+        float recipNorm;
+        float s0, s1, s2, s3;
+        float qDot1, qDot2, qDot3, qDot4;
+        float _2q0, _2q1, _2q2, _2q3, _4q0, _4q1, _4q2 ,_8q1, _8q2, q0q0, q1q1, q2q2, q3q3;
+
+        // Convert gyroscope degrees/sec to radians/sec
+        gx *= M_PI / 180.0f; gy *= M_PI / 180.0f; gz *= M_PI / 180.0f;
+
+        // Rate of change of quaternion from gyroscope
+        qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
+        qDot2 = 0.5f * (q0 * gx + q2 * gz - q3 * gy);
+        qDot3 = 0.5f * (q0 * gy - q1 * gz + q3 * gx);
+        qDot4 = 0.5f * (q0 * gz + q1 * gy - q2 * gx);
+
+        // Compute feedback only if accelerometer measurement valid (avoids NaN)
+        if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
+
+            // Normalize accelerometer measurement
+            recipNorm = 1.0f / std::sqrt(ax * ax + ay * ay + az * az);
+            ax *= recipNorm; ay *= recipNorm; az *= recipNorm;
+
+            // Auxiliary variables to avoid repeated arithmetic
+            _2q0 = 2.0f * q0; _2q1 = 2.0f * q1; _2q2 = 2.0f * q2; _2q3 = 2.0f * q3;
+            _4q0 = 4.0f * q0; _4q1 = 4.0f * q1; _4q2 = 4.0f * q2; _8q1 = 8.0f * q1; _8q2 = 8.0f * q2;
+            q0q0 = q0 * q0; q1q1 = q1 * q1; q2q2 = q2 * q2; q3q3 = q3 * q3;
+
+            // Gradient decent algorithm corrective step
+            s0 = _4q0 * q2q2 + _2q2 * ax + _4q0 * q1q1 - _2q1 * ay;
+            s1 = _4q1 * q3q3 - _2q3 * ax + 4.0f * q0q0 * q1 - _2q0 * ay - _4q1 + _8q1 * q1q1 + _8q1 * q2q2 + _4q1 * az;
+            s2 = 4.0f * q0q0 * q2 + _2q0 * ax + _4q2 * q3q3 - _2q3 * ay - _4q2 + _8q2 * q1q1 + _8q2 * q2q2 + _4q2 * az;
+            s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
+            
+            recipNorm = 1.0f / std::sqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3); 
+            s0 *= recipNorm; s1 *= recipNorm; s2 *= recipNorm; s3 *= recipNorm;
+
+            // Apply feedback step
+            qDot1 -= beta * s0; qDot2 -= beta * s1; qDot3 -= beta * s2; qDot4 -= beta * s3;
+        }
+
+        // Integrate rate of change of quaternion to yield quaternion
+        q0 += qDot1 * dt; q1 += qDot2 * dt; q2 += qDot3 * dt; q3 += qDot4 * dt;
+
+        // Normalize quaternion
+        recipNorm = 1.0f / std::sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+        q0 *= recipNorm; q1 *= recipNorm; q2 *= recipNorm; q3 *= recipNorm;
     }
 
-    Quat getQuaternion() {
-        return {q0, q1, q2, q3};
-    }
+    Quat getQuaternion() { return {q0, q1, q2, q3}; }
 };
 
 // ---------- 4. IMU SENSOR IMPLEMENTATION ----------
 
-// Derived class for the specific IMU wrapping the hardware [cite: 34, 50]
 class IMUSensor : public I2CDevice {
 private:
     float accelScale, gyroScale;
@@ -96,22 +122,19 @@ private:
 
 public:
     IMUSensor(int bus, int address) : I2CDevice(bus, address) {
-        // Define scaling factors based on maximum measurement values 
-        // Example: MPU6050 set to +-2g and +-250 deg/s
         accelScale = 2.0f / 32768.0f;  
         gyroScale = 250.0f / 32768.0f; 
     }
 
     void configureIMU() {
-        // Set configuration registers to wake up the sensor [cite: 34]
-        // writeRegister8(0x6B, 0x00); 
+        // WAKE UP THE SENSOR! 
+        // 0x6B is the Power Management 1 register for MPU6050. Writing 0x00 wakes it up.
+        writeRegister8(0x6B, 0x00); 
     }
 
-    // Convert the sensor raw measurements to physical values 
     std::vector<float> readPhysicalValues() {
         std::vector<float> data(6, 0.0f);
         
-        // Note: Replace these hex addresses with your actual IMU's register addresses!
         data[0] = readRegister16(0x3B) * accelScale; // Accel X
         data[1] = readRegister16(0x3D) * accelScale; // Accel Y
         data[2] = readRegister16(0x3F) * accelScale; // Accel Z
@@ -125,10 +148,7 @@ public:
 
     Quat updateAndGetOrientation(float dt) {
         std::vector<float> phys = readPhysicalValues();
-        
-        // Interface the measurement data with the algorithm code [cite: 43]
         filter.update(phys[3], phys[4], phys[5], phys[0], phys[1], phys[2], dt);
-        
         return filter.getQuaternion();
     }
 };
@@ -136,29 +156,24 @@ public:
 // ---------- 5. MAIN EXECUTION ----------
 
 int main() {
-    // Initialize IMU on I2C bus 1
+    // Assuming standard MPU6050 on Bus 1, Address 0x68
     IMUSensor myIMU(1, 0x68);
     myIMU.configureIMU();
 
-    std::cout << "Starting IMU Read and Madgwick Fusion..." << std::endl;
+    std::cout << "Starting Hardware IMU Read and Real Madgwick Fusion..." << std::endl;
     std::cout << "Press Ctrl+C to stop." << std::endl;
-    std::cout << "---------------------------------------" << std::endl;
+    std::cout << "--------------------------------------------------------" << std::endl;
 
-    float simulated_time = 0.0f;
-
-    // Continuous loop to output estimations in the terminal window 
     while (true) {
-        Quat q = myIMU.updateAndGetOrientation(simulated_time);
-        simulated_time += 0.01f; // Simulated dt for the loop
+        // We use dt = 0.01f because we sleep for 10ms (100Hz)
+        Quat q = myIMU.updateAndGetOrientation(0.01f);
 
-        // Print the quaternion format to the terminal [cite: 30]
         std::cout << std::fixed << std::setprecision(4);
         std::cout << "Quaternion -> w: " << q.w 
                   << " | x: " << q.x 
                   << " | y: " << q.y 
                   << " | z: " << q.z << "\r" << std::flush;
 
-        // Sleep for ~10ms to create a 100Hz read loop
         usleep(10000); 
     }
 
