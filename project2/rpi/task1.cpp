@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <iomanip>
+#include <cstdint> // Added this line to fix the uint8_t and int16_t errors
 
 // ---------- 1. DATA STRUCTURE ----------
 
