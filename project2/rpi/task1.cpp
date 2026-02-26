@@ -45,11 +45,12 @@ public:
     }
 
     int16_t readRegister16(uint8_t reg) {
-        if (file < 0) return 0; 
+        if (file < 0) return 0;
         uint8_t buffer[2];
         if (write(file, &reg, 1) != 1) return 0;
         if (read(file, buffer, 2) != 2) return 0;
-        return (int16_t)((buffer[0] << 8) | buffer[1]); 
+        // LSM6DS33 is little-endian: low byte first, high byte second
+        return (int16_t)(buffer[0] | (buffer[1] << 8));
     }
 };
 
@@ -122,27 +123,31 @@ private:
 
 public:
     IMUSensor(int bus, int address) : I2CDevice(bus, address) {
-        accelScale = 2.0f / 32768.0f;  
-        gyroScale = 250.0f / 32768.0f; 
+        // LSM6DS33 sensitivity at default full-scale ranges
+        accelScale = 0.061f / 1000.0f; // mg/LSB → g/LSB  (±2g range)
+        gyroScale  = 8.75f  / 1000.0f; // mdps/LSB → dps/LSB (±245 dps range)
     }
 
     void configureIMU() {
-        // WAKE UP THE SENSOR! 
-        // 0x6B is the Power Management 1 register for MPU6050. Writing 0x00 wakes it up.
-        writeRegister8(0x6B, 0x00); 
+        // CTRL1_XL (0x10): 0x40 = ODR 104 Hz, ±2g full-scale
+        writeRegister8(0x10, 0x40);
+        // CTRL2_G  (0x11): 0x40 = ODR 104 Hz, ±245 dps full-scale
+        writeRegister8(0x11, 0x40);
+        std::cout << "LSM6DS33 configured at 104 Hz" << std::endl;
     }
 
     std::vector<float> readPhysicalValues() {
         std::vector<float> data(6, 0.0f);
-        
-        data[0] = readRegister16(0x3B) * accelScale; // Accel X
-        data[1] = readRegister16(0x3D) * accelScale; // Accel Y
-        data[2] = readRegister16(0x3F) * accelScale; // Accel Z
-        
-        data[3] = readRegister16(0x43) * gyroScale;  // Gyro X
-        data[4] = readRegister16(0x45) * gyroScale;  // Gyro Y
-        data[5] = readRegister16(0x47) * gyroScale;  // Gyro Z
-        
+
+        // LSM6DS33 output registers (little-endian, low byte at lower address)
+        data[0] = readRegister16(0x28) * accelScale; // Accel X  (OUTX_L_XL)
+        data[1] = readRegister16(0x2A) * accelScale; // Accel Y  (OUTY_L_XL)
+        data[2] = readRegister16(0x2C) * accelScale; // Accel Z  (OUTZ_L_XL)
+
+        data[3] = readRegister16(0x22) * gyroScale;  // Gyro X   (OUTX_L_G)
+        data[4] = readRegister16(0x24) * gyroScale;  // Gyro Y   (OUTY_L_G)
+        data[5] = readRegister16(0x26) * gyroScale;  // Gyro Z   (OUTZ_L_G)
+
         return data;
     }
 
@@ -156,8 +161,8 @@ public:
 // ---------- 5. MAIN EXECUTION ----------
 
 int main() {
-    // Assuming standard MPU6050 on Bus 1, Address 0x68
-    IMUSensor myIMU(1, 0x68);
+    // LSM6DS33 on Bus 1, Address 0x6B
+    IMUSensor myIMU(1, 0x6B);
     myIMU.configureIMU();
 
     std::cout << "Starting Hardware IMU Read and Real Madgwick Fusion..." << std::endl;
