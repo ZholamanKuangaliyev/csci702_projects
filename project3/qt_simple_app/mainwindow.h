@@ -25,12 +25,14 @@ private slots:
     void onPercent();
 
 private:
+    QLabel*    m_equation;   // shows the running equation above the display
     QLineEdit* m_display;
 
     // Calculator state
     double m_operand1{0.0};
     QString m_pendingOp{};
-    bool m_newNumber{true};   // next digit starts a fresh number
+    QString m_operand1Str{}; // string representation of first operand for display
+    bool m_newNumber{true};  // next digit starts a fresh number
 
     QPushButton* makeButton(const QString& text,
                             const QString& style = {});
