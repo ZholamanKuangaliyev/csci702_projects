@@ -1,0 +1,5 @@
+/home/jan/Documents/csci702_projects/project3/qt_imu_client/build/CMakeFiles/qt_imu_client.dir
+/home/jan/Documents/csci702_projects/project3/qt_imu_client/build/CMakeFiles/edit_cache.dir
+/home/jan/Documents/csci702_projects/project3/qt_imu_client/build/CMakeFiles/rebuild_cache.dir
+/home/jan/Documents/csci702_projects/project3/qt_imu_client/build/CMakeFiles/qt_imu_client_autogen_timestamp_deps.dir
+/home/jan/Documents/csci702_projects/project3/qt_imu_client/build/CMakeFiles/qt_imu_client_autogen.dir

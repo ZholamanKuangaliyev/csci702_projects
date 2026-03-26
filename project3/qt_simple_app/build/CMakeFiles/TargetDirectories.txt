@@ -1,0 +1,5 @@
+/home/jan/Documents/csci702_projects/project3/qt_simple_app/build/CMakeFiles/qt_simple_app.dir
+/home/jan/Documents/csci702_projects/project3/qt_simple_app/build/CMakeFiles/edit_cache.dir
+/home/jan/Documents/csci702_projects/project3/qt_simple_app/build/CMakeFiles/rebuild_cache.dir
+/home/jan/Documents/csci702_projects/project3/qt_simple_app/build/CMakeFiles/qt_simple_app_autogen_timestamp_deps.dir
+/home/jan/Documents/csci702_projects/project3/qt_simple_app/build/CMakeFiles/qt_simple_app_autogen.dir
