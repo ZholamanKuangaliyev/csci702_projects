@@ -8,7 +8,7 @@
 // Run:
 //   ./motor_l298n_pigpio
 //
-// Test sequence: 30% fwd → 60% fwd → stop → 30% reverse → stop
+// Test sequence: 30% fwd → 60% fwd → 100% fwd → stop → 30% reverse → stop
 
 #include <pigpiod_if2.h>
 #include <iostream>
@@ -91,17 +91,22 @@ int main() {
     right.forward(60);
     sleep_ms(3000);
 
-    std::cout << "[3] Stop (2 s)" << std::endl;
+    std::cout << "[3] 100% forward (3 s)" << std::endl;
+    left.forward(100);
+    right.forward(100);
+    sleep_ms(3000);
+
+    std::cout << "[4] Stop (2 s)" << std::endl;
     left.stop();
     right.stop();
     sleep_ms(2000);
 
-    std::cout << "[4] 30% reverse (3 s)" << std::endl;
+    std::cout << "[5] 30% reverse (3 s)" << std::endl;
     left.reverse(30);
     right.reverse(30);
     sleep_ms(3000);
 
-    std::cout << "[5] Stop" << std::endl;
+    std::cout << "[6] Stop" << std::endl;
     left.stop();
     right.stop();
 
