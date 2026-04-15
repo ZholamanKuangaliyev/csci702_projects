@@ -18,6 +18,7 @@
 
 #include <pigpiod_if2.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
