@@ -8,7 +8,7 @@
 // Run:
 //   ./motor_l298n_pigpio
 //
-// Test sequence: 100% fwd → stop → 100% reverse → stop
+// Test sequence: 30% fwd → 60% fwd → stop → 30% reverse → stop
 
 #include <pigpiod_if2.h>
 #include <iostream>
@@ -81,22 +81,27 @@ int main() {
 
     std::cout << "\n=== Task 2: Dual motor test ===" << std::endl;
 
-    std::cout << "[1] 100% forward (5 s)" << std::endl;
-    left.forward(100);
-    right.forward(100);
-    sleep_ms(5000);
+    std::cout << "[1] 30% forward (3 s)" << std::endl;
+    left.forward(30);
+    right.forward(30);
+    sleep_ms(3000);
 
-    std::cout << "[2] Stop (2 s)" << std::endl;
+    std::cout << "[2] 60% forward (3 s)" << std::endl;
+    left.forward(60);
+    right.forward(60);
+    sleep_ms(3000);
+
+    std::cout << "[3] Stop (2 s)" << std::endl;
     left.stop();
     right.stop();
     sleep_ms(2000);
 
-    std::cout << "[3] 100% reverse (5 s)" << std::endl;
-    left.reverse(100);
-    right.reverse(100);
-    sleep_ms(5000);
+    std::cout << "[4] 30% reverse (3 s)" << std::endl;
+    left.reverse(30);
+    right.reverse(30);
+    sleep_ms(3000);
 
-    std::cout << "[4] Stop" << std::endl;
+    std::cout << "[5] Stop" << std::endl;
     left.stop();
     right.stop();
 
