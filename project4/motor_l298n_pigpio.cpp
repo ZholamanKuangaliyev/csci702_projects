@@ -1,97 +1,102 @@
+// Dagu Rover 5 — Task 2: Dual motor PWM control
+// Test sequence: 30% fwd → 60% fwd → stop → 30% reverse → stop
+// HW PWM on GPIO12 (left ENA) and GPIO13 (right ENB)
+
 #include <pigpio.h>
 #include <iostream>
 #include <thread>
 #include <chrono>
 #include <algorithm>
 
+static constexpr unsigned PWM_FREQ  = 1000;      // Hz
+static constexpr unsigned PWM_RANGE = 1000000;   // 0–1,000,000 (pigpio HW PWM)
+
 class MotorL298N {
 public:
     MotorL298N(int enaPin, int in1Pin, int in2Pin)
         : ena(enaPin), in1(in1Pin), in2(in2Pin) {}
 
-    bool init() {
-        if (gpioInitialise() < 0) {
-            std::cerr << "pigpio initialization failed." << std::endl;
-            return false;
-        }
-
-        gpioSetMode(ena, PI_OUTPUT);
+    // Call once after gpioInitialise()
+    void setup() {
         gpioSetMode(in1, PI_OUTPUT);
         gpioSetMode(in2, PI_OUTPUT);
-
         gpioWrite(in1, 0);
         gpioWrite(in2, 0);
-
-        // PWM frequency for ENA
-        gpioSetPWMfrequency(ena, 1000);   // 1 kHz
-        gpioSetPWMrange(ena, 255);        // duty cycle range 0..255
-        gpioPWM(ena, 0);
-
-        return true;
+        gpioHardwarePWM(ena, PWM_FREQ, 0);
     }
 
     void forward(int speedPercent) {
-        int pwmValue = percentToPwm(speedPercent);
         gpioWrite(in1, 1);
         gpioWrite(in2, 0);
-        gpioPWM(ena, pwmValue);
+        gpioHardwarePWM(ena, PWM_FREQ, percentToDuty(speedPercent));
     }
 
     void reverse(int speedPercent) {
-        int pwmValue = percentToPwm(speedPercent);
         gpioWrite(in1, 0);
         gpioWrite(in2, 1);
-        gpioPWM(ena, pwmValue);
+        gpioHardwarePWM(ena, PWM_FREQ, percentToDuty(speedPercent));
     }
 
     void stop() {
-        gpioPWM(ena, 0);
+        gpioHardwarePWM(ena, PWM_FREQ, 0);
         gpioWrite(in1, 0);
         gpioWrite(in2, 0);
     }
 
-    void shutdown() {
-        stop();
-        gpioTerminate();
-    }
-
 private:
-    int ena;
-    int in1;
-    int in2;
+    int ena, in1, in2;
 
-    int percentToPwm(int speedPercent) {
-        speedPercent = std::clamp(speedPercent, 0, 100);
-        return speedPercent * 255 / 100;
+    unsigned percentToDuty(int pct) {
+        pct = std::clamp(pct, 0, 100);
+        return static_cast<unsigned>(pct * PWM_RANGE / 100);
     }
 };
 
-int main() {
-    MotorL298N motor(12, 23, 24);
+static void sleep_ms(int ms) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
 
-    if (!motor.init()) {
+int main() {
+    if (gpioInitialise() < 0) {
+        std::cerr << "pigpio init failed" << std::endl;
         return 1;
     }
 
-    std::cout << "Forward ramp..." << std::endl;
-    for (int speed = 0; speed <= 100; speed += 10) {
-        motor.forward(speed);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
+    // Left:  ENA=GPIO12, IN1=GPIO23, IN2=GPIO24
+    // Right: ENB=GPIO13, IN3=GPIO27, IN4=GPIO22
+    MotorL298N left(12, 23, 24);
+    MotorL298N right(13, 27, 22);
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    left.setup();
+    right.setup();
 
-    motor.stop();
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::cout << "=== Task 2: Dual motor test ===" << std::endl;
 
-    std::cout << "Reverse ramp..." << std::endl;
-    for (int speed = 0; speed <= 100; speed += 10) {
-        motor.reverse(speed);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
+    std::cout << "[1] 30% forward..." << std::endl;
+    left.forward(30);
+    right.forward(30);
+    sleep_ms(2000);
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::cout << "[2] 60% forward..." << std::endl;
+    left.forward(60);
+    right.forward(60);
+    sleep_ms(2000);
 
-    motor.shutdown();
+    std::cout << "[3] Stop..." << std::endl;
+    left.stop();
+    right.stop();
+    sleep_ms(1000);
+
+    std::cout << "[4] 30% reverse..." << std::endl;
+    left.reverse(30);
+    right.reverse(30);
+    sleep_ms(2000);
+
+    std::cout << "[5] Stop." << std::endl;
+    left.stop();
+    right.stop();
+
+    gpioTerminate();
+    std::cout << "Done." << std::endl;
     return 0;
 }
