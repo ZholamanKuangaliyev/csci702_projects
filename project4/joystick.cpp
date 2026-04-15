@@ -245,7 +245,7 @@ int main() {
 
     // WebSocket endpoint
     CROW_ROUTE(app, "/ws")
-        .websocket()
+        .websocket(&app)
         .onopen([](crow::websocket::connection& /*conn*/) {
             std::cout << "Phone connected" << std::endl;
         })
