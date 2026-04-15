@@ -10,12 +10,16 @@ task2: motor_l298n_pigpio.cpp
 task3: joystick.cpp
 	$(CXX) $(CXXFLAGS) joystick.cpp -o joystick -I. $(LIBS_BASE) -latomic
 
+# Task 4 — PD yaw control via IMU
+task4: pd_control.cpp
+	$(CXX) $(CXXFLAGS) pd_control.cpp -o pd_control $(LIBS_BASE)
+
 # Task 5 — Encoder reading
 task5: encoder.cpp
 	$(CXX) $(CXXFLAGS) encoder.cpp -o encoder $(LIBS_BASE)
 
 # Build all
-all: task2 task3 task5
+all: task2 task3 task4 task5
 
 clean:
 	rm -f motor_l298n_pigpio joystick encoder
