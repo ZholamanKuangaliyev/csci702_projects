@@ -280,8 +280,8 @@ static void controlThread(MotorL298N& left, MotorL298N& right, double psi_ref) {
         // Map omega_cmd proportionally to PWM [-1, 1]
         double pwm = std::clamp(omega_cmd / OMEGA_MAX, -1.0, 1.0);
 
-        right.setSpeed( pwm);
-        left.setSpeed (-pwm);
+        right.setSpeed(-pwm);
+        left.setSpeed ( pwm);
 
         // Log every ~0.5 s
         static int tick = 0;
