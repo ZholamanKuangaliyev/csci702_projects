@@ -249,7 +249,7 @@ int main() {
         .onopen([](crow::websocket::connection& /*conn*/) {
             std::cout << "Phone connected" << std::endl;
         })
-        .onclose([&](crow::websocket::connection& /*conn*/, const std::string& /*reason*/) {
+        .onclose([&](crow::websocket::connection& /*conn*/, const std::string& /*reason*/, uint16_t /*code*/) {
             std::cout << "Phone disconnected — stopping motors" << std::endl;
             std::lock_guard<std::mutex> lock(motor_mutex);
             left.stop();
