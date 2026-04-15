@@ -1,165 +1,220 @@
-// Add this to your existing pigpio motor template:
-// Quadrature encoder reader (A/B channels) using pigpio callbacks.
-// - Counts edges reliably
-// - Provides position count + velocity estimate
+// Dagu Rover 5 — Task 5: Encoder reading
+// Drives left motor at 30% → 60% → 100% → stop
+// Prints count, wheel angle (rad), and RPM every 100 ms
 //
-// IMPORTANT ELECTRICAL NOTE:
-// If your encoder is powered from 5V, its A/B outputs are likely 5V.
-// Raspberry Pi GPIO is 3.3V only → use a level shifter/divider before connecting.
+// Encoder pins: A=GPIO17, B=GPIO25 (via level shifter)
+// Motor:        ENA=GPIO12, IN1=GPIO23, IN2=GPIO24
+//
+// Requires pigpiod running:
+//   sudo systemctl start pigpiod
+//
+// Compile:
+//   g++ encoder.cpp -o encoder -lpigpiod_if2 -lpthread
+//
+// Run:
+//   ./encoder
 
-#include <pigpio.h>
-
-#include <atomic>
+#include <pigpiod_if2.h>
+#include <iostream>
+#include <iomanip>
+#include <thread>
 #include <chrono>
-#include <cstdint>
-#include <mutex>
+#include <atomic>
+#include <cmath>
+#include <algorithm>
+
+// Encoder resolution: 333 counts/rev x4 decoding = 1332 counts/rev
+static constexpr double CPR = 1332.0;
+static constexpr double TWO_PI = 2.0 * M_PI;
+
+// ── QuadratureEncoder ────────────────────────────────────────────────────────
 
 class QuadratureEncoder {
 public:
-  // If you know your encoder resolution, set these for velocity conversion:
-  // counts_per_wheel rev_output = 333 counts/rev
-  // If you count 4 edges (x4 decoding), effective counts/rev = 4 * 333 = 1332 
-  QuadratureEncoder(int gpioA, int gpioB,
-                    double counts_per_rev_effective = 1332,
-                    unsigned glitch_us = 50)
-      : gpioA_(gpioA),
-        gpioB_(gpioB),
-        cpr_eff_(counts_per_rev_effective),
-        glitch_us_(glitch_us) {}
+    QuadratureEncoder(int pi, int gpioA, int gpioB, unsigned glitch_us = 50)
+        : pi_(pi), gpioA_(gpioA), gpioB_(gpioB), glitch_us_(glitch_us) {}
 
-  void init() {
-    gpioSetMode(gpioA_, PI_INPUT);
-    gpioSetMode(gpioB_, PI_INPUT);
+    void init() {
+        set_mode(pi_, gpioA_, PI_INPUT);
+        set_mode(pi_, gpioB_, PI_INPUT);
+        set_pull_up_down(pi_, gpioA_, PI_PUD_UP);
+        set_pull_up_down(pi_, gpioB_, PI_PUD_UP);
+        set_glitch_filter(pi_, gpioA_, glitch_us_);
+        set_glitch_filter(pi_, gpioB_, glitch_us_);
 
-    // Enable pull-ups if you have open-drain outputs or long wires (often helpful).
-    // If your encoder outputs are push-pull, pull-ups still usually OK.
-    gpioSetPullUpDown(gpioA_, PI_PUD_UP);
-    gpioSetPullUpDown(gpioB_, PI_PUD_UP);
+        int a = gpio_read(pi_, gpioA_);
+        int b = gpio_read(pi_, gpioB_);
+        last_state_.store((a << 1) | b);
 
-    // Debounce / noise filtering in pigpio (very useful near motors):
-    gpioGlitchFilter(gpioA_, glitch_us_);
-    gpioGlitchFilter(gpioB_, glitch_us_);
+        cbA_ = callback_ex(pi_, gpioA_, EITHER_EDGE, alertTrampoline, this);
+        cbB_ = callback_ex(pi_, gpioB_, EITHER_EDGE, alertTrampoline, this);
 
-    // Initialize last state
-    int a = gpioRead(gpioA_);
-    int b = gpioRead(gpioB_);
-    last_state_.store((a << 1) | b);
+        last_vel_tick_  = get_current_tick(pi_);
+        last_vel_count_ = count_.load();
+    }
 
-    // Register callbacks on BOTH edges for both channels (x4 decoding)
-    cbA_ = gpioSetAlertFuncEx(gpioA_, &QuadratureEncoder::alertTrampoline, this);
-    cbB_ = gpioSetAlertFuncEx(gpioB_, &QuadratureEncoder::alertTrampoline, this);
+    void shutdown() {
+        callback_cancel(cbA_);
+        callback_cancel(cbB_);
+    }
 
-    // For velocity estimation:
-    last_vel_time_us_.store(gpioTick());
-    last_vel_count_.store(count_.load());
-  }
+    int32_t getCount() const { return count_.load(); }
+    void    resetCount()      { count_.store(0); }
 
-  void shutdown() {
-    // Disable callbacks
-    gpioSetAlertFunc(gpioA_, nullptr);
-    gpioSetAlertFunc(gpioB_, nullptr);
-    // Optionally remove glitch filters
-    gpioGlitchFilter(gpioA_, 0);
-    gpioGlitchFilter(gpioB_, 0);
-  }
+    // Wheel angle in radians
+    double getAngleRad() const {
+        return (TWO_PI / CPR) * count_.load();
+    }
 
-  int32_t getCount() const { return count_.load(); }
+    // Angular velocity in RPM — call at fixed interval (e.g. 100 ms)
+    double getRPM() {
+        uint32_t now_tick  = get_current_tick(pi_);
+        int32_t  now_count = count_.load();
 
-  void resetCount(int32_t v = 0) { count_.store(v); }
+        uint32_t dt_us = now_tick - last_vel_tick_;
+        if (dt_us == 0) dt_us = 1;
 
-  // Returns wheel angular velocity (rad/s) using a time window since last call.
-  // Call this at a fixed interval in your control loop (e.g., every 10 ms).
-  double getOmegaRadPerSec() {
-    const uint32_t now_us = gpioTick();
-    const int32_t c_now = count_.load();
+        int32_t dc = now_count - last_vel_count_;
 
-    const uint32_t prev_us = last_vel_time_us_.load();
-    const int32_t  c_prev  = last_vel_count_.load();
+        last_vel_tick_  = now_tick;
+        last_vel_count_ = now_count;
 
-    uint32_t dt_us = now_us - prev_us;
-    if (dt_us == 0) dt_us = 1;
-
-    const int32_t dc = c_now - c_prev;
-
-    last_vel_time_us_.store(now_us);
-    last_vel_count_.store(c_now);
-
-    const double dt = static_cast<double>(dt_us) * 1e-6;
-    const double rev_per_sec = (static_cast<double>(dc) / cpr_eff_) / dt;
-    return rev_per_sec * 2.0 * 3.141592653589793;
-  }
+        double dt_s      = static_cast<double>(dt_us) * 1e-6;
+        double rev_per_s = (static_cast<double>(dc) / CPR) / dt_s;
+        return rev_per_s * 60.0;
+    }
 
 private:
-  int gpioA_;
-  int gpioB_;
-  double cpr_eff_;
-  unsigned glitch_us_;
+    int      pi_, gpioA_, gpioB_;
+    unsigned glitch_us_;
+    int      cbA_{0}, cbB_{0};
 
-  std::atomic<int32_t> count_{0};
-  std::atomic<int> last_state_{0};
+    std::atomic<int32_t>  count_{0};
+    std::atomic<int>      last_state_{0};
+    uint32_t              last_vel_tick_{0};
+    int32_t               last_vel_count_{0};
 
-  // velocity state
-  std::atomic<uint32_t> last_vel_time_us_{0};
-  std::atomic<int32_t>  last_vel_count_{0};
-
-  // pigpio requires static trampoline
-  static void alertTrampoline(int gpio, int level, uint32_t tick, void* user) {
-    (void)gpio; (void)tick;
-    if (level == PI_TIMEOUT) return; // ignore timeouts
-    auto* self = static_cast<QuadratureEncoder*>(user);
-    self->onEdge();
-  }
-
-  void onEdge() {
-    // Read both pins to get current AB state
-    const int a = gpioRead(gpioA_);
-    const int b = gpioRead(gpioB_);
-    const int new_state = (a << 1) | b;
-
-    const int old_state = last_state_.exchange(new_state);
-
-    // State transition table for quadrature (x4)
-    // Valid transitions: 00->01->11->10->00 (one direction) and reverse.
-    // We compute delta based on old/new combination.
-    const int idx = (old_state << 2) | new_state;
-    // Map idx -> +1/-1/0
-    // This table is standard for Gray-code quadrature.
-    static const int8_t delta[16] = {
-      0, +1, -1,  0,
-     -1,  0,  0, +1,
-     +1,  0,  0, -1,
-      0, -1, +1,  0
-    };
-
-    const int8_t d = delta[idx & 0x0F];
-    if (d != 0) {
-      count_.fetch_add(d);
+    static void alertTrampoline(int /*pi*/, unsigned /*gpio*/, unsigned level,
+                                uint32_t /*tick*/, void* user) {
+        if (level == PI_TIMEOUT) return;
+        static_cast<QuadratureEncoder*>(user)->onEdge();
     }
-  }
 
-  int cbA_{0};
-  int cbB_{0};
+    void onEdge() {
+        const int a = gpio_read(pi_, gpioA_);
+        const int b = gpio_read(pi_, gpioB_);
+        const int new_state = (a << 1) | b;
+        const int old_state = last_state_.exchange(new_state);
+
+        const int idx = (old_state << 2) | new_state;
+        static const int8_t delta[16] = {
+             0, +1, -1,  0,
+            -1,  0,  0, +1,
+            +1,  0,  0, -1,
+             0, -1, +1,  0
+        };
+        const int8_t d = delta[idx & 0x0F];
+        if (d != 0) count_.fetch_add(d);
+    }
 };
 
-///////////////////////
-//Example snippet to include to the motor_control.cpp inside main() after gpioInitialise())
-///////////////////////
+// ── MotorL298N ───────────────────────────────────────────────────────────────
 
-// Example encoder pins (choose your GPIOs)
-constexpr int ENC_A = 17;
-constexpr int ENC_B = 25;
+class MotorL298N {
+public:
+    MotorL298N(int pi, int enaPin, int in1Pin, int in2Pin)
+        : pi_(pi), ena_(enaPin), in1_(in1Pin), in2_(in2Pin) {}
 
-// For Pololu 25D 20.4:1, 48 CPR:
-// counts per output rev (1x) ≈ 48 * 20.4 = 979.2
-// x4 decoding => 3916.8
-QuadratureEncoder enc(ENC_A, ENC_B, 3916.8 /*effective CPR*/, 50 /*glitch us*/);
-enc.init();
+    void setup() {
+        set_mode(pi_, in1_, PI_OUTPUT);
+        set_mode(pi_, in2_, PI_OUTPUT);
+        gpio_write(pi_, in1_, 0);
+        gpio_write(pi_, in2_, 0);
+        set_PWM_frequency(pi_, ena_, 1000);
+        set_PWM_range(pi_, ena_, 255);
+        set_PWM_dutycycle(pi_, ena_, 0);
+    }
 
-// In your control loop (e.g., 100 Hz or 200 Hz):
-for (;;) {
-  int32_t pos = enc.getCount();
-  double omega = enc.getOmegaRadPerSec();   // rad/s
-  // ... use omega for Kv * v_wheel damping, logging, etc.
-  // std::cout << "pos=" << pos << " omega=" << omega << " rad/s\n";
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    void forward(int pct) {
+        gpio_write(pi_, in1_, 1);
+        gpio_write(pi_, in2_, 0);
+        set_PWM_dutycycle(pi_, ena_, pct * 255 / 100);
+    }
+
+    void stop() {
+        set_PWM_dutycycle(pi_, ena_, 0);
+        gpio_write(pi_, in1_, 0);
+        gpio_write(pi_, in2_, 0);
+    }
+
+private:
+    int pi_, ena_, in1_, in2_;
+};
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+static void sleep_ms(int ms) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+static void printHeader() {
+    std::cout << std::left
+              << std::setw(8)  << "PWM%"
+              << std::setw(10) << "Count"
+              << std::setw(14) << "Angle(rad)"
+              << std::setw(10) << "RPM"
+              << std::endl;
+    std::cout << std::string(42, '-') << std::endl;
+}
+
+static void printRow(int pct, int32_t count, double angle, double rpm) {
+    std::cout << std::left  << std::fixed << std::setprecision(3)
+              << std::setw(8)  << pct
+              << std::setw(10) << count
+              << std::setw(14) << angle
+              << std::setw(10) << rpm
+              << std::endl;
+}
+
+// ── main ─────────────────────────────────────────────────────────────────────
+
+int main() {
+    int pi = pigpio_start(NULL, NULL);
+    if (pi < 0) {
+        std::cerr << "pigpiod connection failed — run: sudo systemctl start pigpiod" << std::endl;
+        return 1;
+    }
+    std::cout << "Connected to pigpiod OK\n" << std::endl;
+
+    // Left motor: ENA=GPIO12, IN1=GPIO23, IN2=GPIO24
+    // Encoder:    A=GPIO17,   B=GPIO25
+    MotorL298N      motor(pi, 12, 23, 24);
+    QuadratureEncoder enc(pi, 17, 25);
+
+    motor.setup();
+    enc.init();
+
+    printHeader();
+
+    // Run at 30%, 60%, 100% — sample every 100 ms for 3 s each
+    for (int pct : {30, 60, 100}) {
+        enc.resetCount();
+        motor.forward(pct);
+        for (int i = 0; i < 30; ++i) {   // 30 × 100 ms = 3 s
+            sleep_ms(100);
+            printRow(pct, enc.getCount(), enc.getAngleRad(), enc.getRPM());
+        }
+    }
+
+    motor.stop();
+
+    std::cout << std::string(42, '-') << std::endl;
+    std::cout << "Final count: " << enc.getCount()
+              << "  angle: " << std::fixed << std::setprecision(3)
+              << enc.getAngleRad() << " rad" << std::endl;
+
+    enc.shutdown();
+    pigpio_stop(pi);
+    std::cout << "Done." << std::endl;
+    return 0;
 }
