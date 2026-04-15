@@ -189,7 +189,7 @@ int main() {
     // Left motor: ENA=GPIO12, IN1=GPIO23, IN2=GPIO24
     // Encoder:    A=GPIO17,   B=GPIO25
     MotorL298N      motor(pi, 12, 23, 24);
-    QuadratureEncoder enc(pi, 17, 25);
+    QuadratureEncoder enc(pi, 25, 17);
 
     motor.setup();
     enc.init();
