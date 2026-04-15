@@ -270,8 +270,8 @@ int main() {
             double r = std::clamp(jy - jx, -1.0, 1.0);
 
             std::lock_guard<std::mutex> lock(motor_mutex);
-            left.setSpeed(l);
-            right.setSpeed(r);
+            left.setSpeed(r);
+            right.setSpeed(l);
         });
 
     std::cout << "Server running on http://0.0.0.0:8080" << std::endl;
