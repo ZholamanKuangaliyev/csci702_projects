@@ -277,16 +277,11 @@ static void controlThread(MotorL298N& left, MotorL298N& right, double psi_ref) {
                 std::max(std::abs(omega_cmd), OMEGA_MIN), omega_cmd);
         }
 
-        // Differential drive: in-place rotation
-        // vR = (L/2)*omega_cmd,  vL = -(L/2)*omega_cmd
-        double phi_R = (L / 2.0) * omega_cmd / r;   // wheel rad/s
-        double phi_L = -(L / 2.0) * omega_cmd / r;
+        // Map omega_cmd proportionally to PWM [-1, 1]
+        double pwm = std::clamp(omega_cmd / OMEGA_MAX, -1.0, 1.0);
 
-        double pwm_R = phi_R / MAX_WHEEL_RADS;
-        double pwm_L = phi_L / MAX_WHEEL_RADS;
-
-        right.setSpeed(pwm_R);
-        left.setSpeed(pwm_L);
+        right.setSpeed( pwm);
+        left.setSpeed (-pwm);
 
         // Log every ~0.5 s
         static int tick = 0;
@@ -294,7 +289,7 @@ static void controlThread(MotorL298N& left, MotorL298N& right, double psi_ref) {
             std::cout << "yaw=" << psi * 180.0 / M_PI
                       << "°  err=" << e_psi * 180.0 / M_PI
                       << "°  ω=" << omega_cmd
-                      << "  L=" << pwm_L << "  R=" << pwm_R << "\n";
+                      << "  pwm=" << pwm << "\n";
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
